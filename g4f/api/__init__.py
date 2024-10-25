@@ -12,18 +12,26 @@ from fastapi.security import APIKeyHeader
 from starlette.exceptions import HTTPException
 from starlette.status import HTTP_422_UNPROCESSABLE_ENTITY, HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN
 from fastapi.encoders import jsonable_encoder
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Union, Optional
 
 import g4f
 import g4f.debug
-from g4f.client import AsyncClient
+from g4f.client import Client
 from g4f.typing import Messages
 from g4f.cookies import read_cookie_files
 
 def create_app():
     app = FastAPI()
     api = Api(app)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=".*",
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     api.register_routes()
     api.register_authorization()
     api.register_validation_exception_handler()
@@ -69,7 +77,7 @@ class AppConfig():
 class Api:
     def __init__(self, app: FastAPI) -> None:
         self.app = app
-        self.client = AsyncClient()
+        self.client = Client()
         self.get_g4f_api_key = APIKeyHeader(name="g4f-api-key")
 
     def register_authorization(self):
@@ -156,7 +164,8 @@ class Api:
                         auth_header = auth_header.split(None, 1)[-1]
                         if auth_header and auth_header != "Bearer":
                             config.api_key = auth_header
-                response = self.client.chat.completions.create(
+                # Use the asynchronous create method and await it
+                response = await self.client.chat.completions.async_create(
                     **{
                         **AppConfig.defaults,
                         **config.dict(exclude_none=True),
@@ -164,7 +173,7 @@ class Api:
                     ignored=AppConfig.ignored_providers
                 )
                 if not config.stream:
-                    return JSONResponse((await response).to_json())
+                    return JSONResponse(response.to_json())
 
                 async def streaming():
                     try:
@@ -196,10 +205,11 @@ class Api:
                         auth_header = auth_header.split(None, 1)[-1]
                         if auth_header and auth_header != "Bearer":
                             config.api_key = auth_header
-                response = self.client.images.generate(
+                # Use the asynchronous generate method and await it
+                response = await self.client.images.async_generate(
                     **config.dict(exclude_none=True),
                 )
-                return JSONResponse((await response).to_json())
+                return JSONResponse(response.to_json())
             except Exception as e:
                 logging.exception(e)
                 return Response(content=format_exception(e, config), status_code=500, media_type="application/json")
